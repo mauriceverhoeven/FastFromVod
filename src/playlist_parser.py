@@ -7,10 +7,12 @@ logger.info(f"initiated module: {__name__}")
 
 
 SLATE_AD_LENGTH = 190
+ONE_DAY = utils.seconds_to_timedelta(24 * 60 * 60)
 
 
 class PlaylistParser:
-    def __init__(self) -> None:
+    def __init__(self, target_date) -> None:
+        self.target_date = utils.get_target_UTC_day(target_date)
         self._programs = []
         self._root = None
         self._date_filter_start = None
@@ -19,21 +21,10 @@ class PlaylistParser:
     def __repr__(self) -> str:
         return f"<Playlist {self.root} >"
 
-    def apply_date_filter(self, program) -> bool:
-        start_ok = True
-        end_ok = True
-        if self._date_filter_start:
-            start_ok = program.program_start >= self._date_filter_start
-        if self._date_filter_end:
-            end_ok = program.program_start < self._date_filter_end
-        return all([start_ok, end_ok])
-
-    def set_date_filter(self, start_date=None, end_date=None) -> None:
-        logger.info(f"{start_date=} {end_date=}")
-        if start_date:
-            self._date_filter_start = utils.get_target_UTC_day(start_date)
-        if end_date:
-            self._date_filter_end = utils.get_target_UTC_day(end_date)
+    def target_date_filter(self, program):
+        return (  # program starts at/after target AND start before target + 1 day
+            self.target_date <= program.program_start <= self.target_date + ONE_DAY
+        )
 
     def add_xml(self, fname: str):
         tree = ET.parse(fname)
@@ -70,7 +61,7 @@ class PlaylistParser:
 
     def get_parsed_programs(self) -> list:
         self._programs.sort()
-        return filter(self.apply_date_filter, self._programs)
+        return filter(self.target_date_filter, self._programs)
 
 
 class Program:

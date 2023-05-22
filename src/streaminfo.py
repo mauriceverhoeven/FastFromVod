@@ -108,11 +108,6 @@ Stream_Matchers = [
     ),
 ]
 
-# MANIFEST_SPLITTER = re.compile(
-#     "#EXT-X-STREAM-INF:BANDWIDTH=(?P<BANDWIDTH>[\d]+).+\n(?P<url>.+m3u8)",
-#     re.MULTILINE,
-# )
-
 
 def find_stream_matcher(streaming_url):
     for Stream_Matcher in Stream_Matchers:

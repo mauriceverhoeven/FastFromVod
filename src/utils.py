@@ -23,9 +23,12 @@ def seconds_to_timedelta(seconds):
 
 
 def get_offset_from_timestamp(timestamp):
+    # logger.info(timestamp)
     start_of_time = datetime_from_isostring(f"1900-01-01T00:00:00Z")
     point_in_time = datetime_from_isostring(f"1900-01-01T{timestamp}Z")
-    return point_in_time - start_of_time
+    # logger.info(f"{start_of_time=}, {point_in_time=}")
+    # logger.info(f"{point_in_time - start_of_time}")
+    return (point_in_time - start_of_time).total_seconds()
 
 
 def pretty_datetime(dateObj):
@@ -34,3 +37,12 @@ def pretty_datetime(dateObj):
 
 def pretty_time(dateObj):
     return datetime.datetime.strftime(dateObj, "%H:%M:%S")
+
+
+def get_epoch_utc():
+    return datetime_from_isostring("1970-01-01T00:00:00Z")
+
+
+def get_epoch_timestamp_milliseconds(dateObj):
+    epoch = get_epoch_utc()
+    return int((dateObj - epoch).total_seconds() * 1000)
