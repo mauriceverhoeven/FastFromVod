@@ -34,18 +34,26 @@ class PlaylistParser:
                 wpk = playlist_event.attrib["WPK"]
                 current_program = self.get_current_playlist_program(wpk)
                 for chaptermarker in playlist_event:
-                    current_program.add_timeline_event(
-                        Chapter(
-                            starttime=playlist_event.attrib["StartTime"],
-                            title=playlist_event.attrib["Title"],
-                            media_starttime=chaptermarker.attrib["MediaStartTime"],
+                    try:
+                        current_program.add_timeline_event(
+                            Chapter(
+                                starttime=playlist_event.attrib["StartTime"],
+                                title=playlist_event.attrib["Title"],
+                                media_starttime=chaptermarker.attrib["MediaStartTime"],
+                            )
                         )
-                    )
+                    except:
+                        logger.info(chaptermarker.attrib)
+                        sys.exit()
             else:
                 current_program.add_timeline_event(
                     Adbreak(
                         starttime=playlist_event.attrib["StartTime"],
-                        duration=int(playlist_event.attrib["Duration"]),
+                        duration=int(
+                            utils.seconds_from_iso_timestring(
+                                playlist_event.attrib["Duration"]
+                            )
+                        ),
                     )
                 )
 

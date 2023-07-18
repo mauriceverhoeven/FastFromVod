@@ -3,6 +3,7 @@ from src import mediatailor as mt
 from src import playlist_parser as pp
 from src import utils
 import argparse
+import sys
 
 logger = log.setup_custom_logger(__name__, loglevel="info")
 logger.info(f"initiated module: {__name__}")
@@ -51,19 +52,10 @@ def get_input_arguments():
     return (inputfiles, target_date, force)
 
 
-def program_in_target_range(start_of_range, end_of_range, program):
-    start_ok = program.starttime >= start_of_range
-    end_ok = program.starttime < end_of_range
-    result = all([start_ok, end_ok])
-    logger.debug(
-        f"{program.wpk} has {program.starttime} within {start_of_range} and {end_of_range} is {result} for "
-    )
-    return result
-
-
 if __name__ == "__main__":
     (inputfiles, target_date, force) = get_input_arguments()
     mt = mt.MediaTailor(create_stack=False)
+    # mt.delete_scheduled_programs()
     playlist = pp.PlaylistParser(target_date)
 
     for inputfile in inputfiles:

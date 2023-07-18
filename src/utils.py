@@ -1,6 +1,7 @@
 from src import log
 import datetime
 
+import isodate
 
 logger = log.setup_custom_logger(__name__, loglevel="info")
 logger.info(f"initiated module: {__name__}")
@@ -23,11 +24,8 @@ def seconds_to_timedelta(seconds):
 
 
 def get_offset_from_timestamp(timestamp):
-    # logger.info(timestamp)
     start_of_time = datetime_from_isostring(f"1900-01-01T00:00:00Z")
     point_in_time = datetime_from_isostring(f"1900-01-01T{timestamp}Z")
-    # logger.info(f"{start_of_time=}, {point_in_time=}")
-    # logger.info(f"{point_in_time - start_of_time}")
     return (point_in_time - start_of_time).total_seconds()
 
 
@@ -46,3 +44,11 @@ def get_epoch_utc():
 def get_epoch_timestamp_milliseconds(dateObj):
     epoch = get_epoch_utc()
     return int((dateObj - epoch).total_seconds() * 1000)
+
+
+def seconds_from_iso_timestring(timestring):
+    return duration_from_iso_timestring(timestring).total_seconds()
+
+
+def duration_from_iso_timestring(timestring):
+    return isodate.parse_duration(timestring)

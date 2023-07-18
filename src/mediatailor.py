@@ -10,8 +10,26 @@ logger.info(f"initiated module: {__name__}")
 
 VOD_SOURCE_LOCATION_ID = "VOD"
 ADS_SOURCE_LOCATION_ID = "ADS"
-SLATE_AD_NAME = "slate_ad_240s"
+SLATE_AD_NAME = "sbs6_classics_rondloper_180s"
 CHANNEL_NAME = "SBS6ClassicsVod"
+
+
+def get_slate_config(slate_name):
+    config = {
+        "slate_ad_190s": {
+            "hls_url": "/out/v1/53e113210a1a42d2af48d1b800dd847d/cc7cfd5fec77421b9be588ecb6ecdb9a/01f78d22f1294a3a8f0d5864f55a384b/index.m3u8",
+            "dash_url": "/out/v1/53e113210a1a42d2af48d1b800dd847d/03c5f633270148bfa0eb85b279588241/b01cbbded8644e8e80dc0e899ce9edd7/index.mpd",
+        },
+        "sbs6_classics_rondloper_180s": {
+            "hls_url": "/out/v1/6b72bdc3e4c244b7804658d0c4e9536a/cc7cfd5fec77421b9be588ecb6ecdb9a/01f78d22f1294a3a8f0d5864f55a384b/index.m3u8",
+            "dash_url": "/out/v1/6b72bdc3e4c244b7804658d0c4e9536a/03c5f633270148bfa0eb85b279588241/b01cbbded8644e8e80dc0e899ce9edd7/index.mpd",
+        },
+    }
+    return config[slate_name]
+
+
+class CustomException(Exception):
+    pass
 
 
 class StackConfigIncompleteExeption(Exception):
@@ -26,8 +44,6 @@ class StackConfigIncompleteExeption(Exception):
 
 def get_adbreak_config(breakpoint_seconds):
     logger.info(f"creating breakpoint at {breakpoint_seconds}")
-    # seconds = int(utils.get_offset_from_timestamp(breakpoint_seconds).total_seconds())
-    # logger.info(f"creating breakpoint at {seconds}")
 
     return {
         "MessageType": "SPLICE_INSERT",
@@ -88,6 +104,42 @@ def schedule_program(
         SourceLocationName=VOD_SOURCE_LOCATION_ID,
         VodSourceName=wpk,
     )
+
+
+def get_schedule(client):
+    scheduled_programs = []
+    result = client.get_channel_schedule(
+        ChannelName=CHANNEL_NAME,
+        DurationMinutes=str(24 * 60),
+        MaxResults=3,
+    )
+    scheduled_programs += result["Items"]
+    next_token = result.get("NextToken", None)
+    logger.info(next_token)
+    while next_token:
+        result = client.get_channel_schedule(
+            ChannelName=CHANNEL_NAME,
+            DurationMinutes=str(24 * 60),
+            MaxResults=10,
+            NextToken=next_token,
+        )
+        next_token = result.get("NextToken", None)
+        scheduled_programs += result["Items"]
+    return scheduled_programs
+
+
+def delete_scheduled_program(client, program_name):
+    return client.delete_program(ChannelName=CHANNEL_NAME, ProgramName=program_name)
+
+
+def delete_all_scheduled_programs(client):
+    for scheduled_program in get_schedule(client):
+        delete_scheduled_program(client, scheduled_program["ProgramName"])
+
+
+def get_scheduled_wpks(client):
+    for scheduled_program in get_schedule(client):
+        yield scheduled_program["VodSourceName"]
 
 
 def get_program_info(client, wpk):
@@ -151,11 +203,19 @@ def create_vod_item(client, wpk, hls_url, dash_url):
     )
 
 
+def delete_vod_item(client, wpk):
+    return client.delete_vod_source(
+        SourceLocationName=VOD_SOURCE_LOCATION_ID, VodSourceName=wpk
+    )
+
+
 def create_slate_ad(client):
+    slate_config = get_slate_config(SLATE_AD_NAME)
+
     return create_source(
         client=client,
-        hls_url="out/v1/53e113210a1a42d2af48d1b800dd847d/cc7cfd5fec77421b9be588ecb6ecdb9a/01f78d22f1294a3a8f0d5864f55a384b/index.m3u8",
-        dash_url="/out/v1/53e113210a1a42d2af48d1b800dd847d/03c5f633270148bfa0eb85b279588241/b01cbbded8644e8e80dc0e899ce9edd7/index.mpd",
+        hls_url=slate_config["hls_url"],
+        dash_url=slate_config["dash_url"],
         source_location_name=ADS_SOURCE_LOCATION_ID,
         source_name=SLATE_AD_NAME,
     )
@@ -184,7 +244,7 @@ def list_ads_names(client):
 
 def create_channel(client):
     # Create Channel
-    return client.create_channel(
+    response = client.create_channel(
         ChannelName=CHANNEL_NAME,
         FillerSlate={
             "SourceLocationName": ADS_SOURCE_LOCATION_ID,
@@ -211,6 +271,24 @@ def create_channel(client):
         Tags={"string": "string"},
         Tier="STANDARD",
     )
+    logger.info(response)
+    client.put_channel_policy(
+        ChannelName=CHANNEL_NAME,
+        Policy=json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Sid": "AllowAnonymous",
+                        "Effect": "Allow",
+                        "Principal": "*",
+                        "Action": "mediatailor:GetManifest",
+                        "Resource": response["Arn"],
+                    }
+                ],
+            }
+        ),
+    )
 
 
 def get_channel_by_channelname(client):
@@ -223,13 +301,12 @@ def get_channel_by_channelname(client):
 class MediaTailor:
     def __init__(self, create_stack=False) -> None:
         self._boto_client = None
+        self._available_wpks = set()
+        self._unavailable_wpks = []
+        self._program_schedule = []
         if create_stack:
             self.create_stack_components()
         self.validate_config()
-        # print(json.dumps(get_program_info(self.client, wpk="objectname"), default=str))
-        self._available_wpks = set()
-        self._unavailable_wpks = set()
-        self._program_schedule = []
 
     def __repr__(self) -> str:
         return f"<MediaTailor for {CHANNEL_NAME}>"
@@ -239,6 +316,13 @@ class MediaTailor:
         if not self._boto_client:
             self._boto_client = get_boto_client()
         return self._boto_client
+
+    def delete_scheduled_programs(self):
+        delete_all_scheduled_programs(client=self.client)
+
+    def remove_vod_content(self):
+        self.delete_scheduled_programs()
+        self.delete_all_provisioned_vod_items()
 
     def create_stack_components(self):
         create_vod_source_location(self.client)
@@ -275,7 +359,8 @@ class MediaTailor:
         return get_channel_by_channelname(self.client)["ChannelName"]
 
     def add_wpk_to_unavailable(self, wpk):
-        self._unavailable_wpks.add(wpk)
+        # self._unavailable_wpks.add(wpk)
+        self._unavailable_wpks.append(wpk)
 
     def add_wpk_to_available(self, wpk):
         self._available_wpks.add(wpk)
@@ -287,8 +372,19 @@ class MediaTailor:
         return self._available_wpks
 
     def add_to_schedule(self, program):
+        if program.program_start < utils.get_UTC_now():
+            logger.info(f"starts in the past: {program.program_start}")
+            return
         if self.is_provisioned(program):
-            self._program_schedule.append(program)
+            if program.program_start < utils.get_UTC_now():
+                self.add_wpk_to_unavailable(
+                    (program.wpk, f"starts in the past: {program.program_start}")
+                )
+            else:
+                self._program_schedule.append(program)
+
+    def active_schedule(self):
+        return get_schedule(self.client)
 
     @property
     def schedule(self):
@@ -296,13 +392,13 @@ class MediaTailor:
 
     def commit(self, force):
         if self._unavailable_wpks:
+            for unavailable in self._unavailable_wpks:
+                print(unavailable)
             if force:
-                print(
-                    f"hese WPK's are not available {self._unavailable_wpks} but override due to {force=}"
-                )
+                print(f"^^ issues are ignored due to {force=}")
             else:
                 print(
-                    f"\n Exit.. as these WPK's are not available {self._unavailable_wpks}"
+                    f"\n Exit.. due to above issues.. use the force (-f) to overrule!"
                 )
                 return
         previous_program_name = None
@@ -328,31 +424,20 @@ class MediaTailor:
                 create_vod_item(
                     self.client,
                     wpk=video_asset.wpk,
-                    hls_url=video_asset.get_non_drm_streaming_url_by_protocol("HLS"),
-                    dash_url=video_asset.get_non_drm_streaming_url_by_protocol("DASH"),
+                    hls_url="out/v1/"
+                    + video_asset.get_non_drm_streaming_url_by_protocol("HLS"),
+                    dash_url="out/v1/"
+                    + video_asset.get_non_drm_streaming_url_by_protocol("DASH"),
                 )
                 self.add_wpk_to_available(program.wpk)
             else:
-                self.add_wpk_to_unavailable(program.wpk)
+                self.add_wpk_to_unavailable((program.wpk, "is not available!"))
                 logger.warning(f"{program.wpk} is not available!")
         return program.wpk in self.available_wpks
 
-    # def provision_vod_source(self, program):
-    #     video_asset = si.VideoAsset(wpk=program.wpk)
-    #     if program.wpk not in self.available_wpks:
-    #         if video_asset.is_available:
-    #             result = create_vod_item(
-    #                 self.client,
-    #                 wpk=video_asset.wpk,
-    #                 hls_url=video_asset.get_non_drm_streaming_url_by_protocol("HLS"),
-    #                 dash_url=video_asset.get_non_drm_streaming_url_by_protocol("DASH"),
-    #             )
-    #             self.add_wpk_to_available(program.wpk)
-    #             logger.info(f"created {program.wpk} -> {result}")
+    def delete_vod_time(self, wpk):
+        return delete_vod_item(self.client, wpk)
 
-    #         else:
-    #             self.add_wpk_to_unavailable(program.wpk)
-    #             logger.warning(f"{program.wpk} is not available!")
-    #     else:
-    #         self.add_to_schedule(program)
-    #         logger.info(f"{program.wpk} already exists")
+    def delete_all_provisioned_vod_items(self):
+        for wpk in self.available_wpks:
+            self.delete_vod_time(wpk)

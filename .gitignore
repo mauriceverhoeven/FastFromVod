@@ -157,3 +157,4 @@ questions.txt
 src/toSingleFile.py
 src/config.py
 src/config.py
+.DS_Store
